@@ -1,6 +1,11 @@
 package main
 
 import (
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/hanwen/go-fuse/fuse"
@@ -9,6 +14,7 @@ import (
 
 type FNode struct {
 	inode     *nodefs.Inode
+	RealPath  string
 	Name      string
 	Size      uint64
 	Atime     uint64
@@ -25,6 +31,24 @@ func (fs *FNode) OnUnmount() {
 
 func (fs *FNode) OnMount(conn *nodefs.FileSystemConnector) {
 	Log.DebugF("OnMount")
+}
+
+func IsHidden(path string) bool {
+	l := strings.Split(path, "/")
+	for _, elem := range l {
+		for _, rule := range HideList {
+			match, err := filepath.Match(rule, elem)
+			if match && err == nil {
+				Log.DebugF("IsHidden: Node '%s' is hidden beacuse '%s' matches '%s'", path, elem, rule)
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (n *FNode) IsHidden() bool {
+	return IsHidden(n.RealPath)
 }
 
 func (n *FNode) StatFs() *fuse.StatfsOut {
@@ -54,9 +78,32 @@ func (n *FNode) OnForget() {
 func (n *FNode) Lookup(out *fuse.Attr, name string, context *fuse.Context) (ret_node *nodefs.Inode, ret_code fuse.Status) {
 	_start := time.Now()
 	defer PrintCallDuration("Lookup", &_start)
-
 	Log.DebugF("Lookup (n=%v; out=%v; name=%v; context=%v)", *n, *out, name, *context)
-	return nil, fuse.ENOSYS
+
+	// Set basics
+	new_node := &FNode{}
+	new_node.RealPath = n.RealPath + "/" + name
+	// Is hidden?
+	if new_node.IsHidden() {
+		return nil, fuse.ENOENT
+	}
+
+	// Is dir?
+	info, err := os.Stat(new_node.RealPath)
+	if err != nil {
+		// Exists?
+		if os.IsNotExist(err) {
+			return nil, fuse.ENOENT
+		}
+
+		Log.ErrorF("os.Stat(%s): %+v", new_node.RealPath, err)
+		return nil, fuse.EIO
+	}
+
+	// Finish
+	child := n.Inode().NewChild(name, info.IsDir(), new_node)
+	child.Node().GetAttr(out, nil, context)
+	return child, fuse.OK
 }
 
 func (n *FNode) Access(mode uint32, context *fuse.Context) (code fuse.Status) {
@@ -66,7 +113,15 @@ func (n *FNode) Access(mode uint32, context *fuse.Context) (code fuse.Status) {
 
 func (n *FNode) Readlink(c *fuse.Context) ([]byte, fuse.Status) {
 	Log.DebugF("Readlink")
-	return nil, fuse.ENOSYS
+	buf := make([]byte, 999)
+
+	num, err := syscall.Readlink(n.RealPath, buf)
+	if err != nil {
+		Log.ErrorF("syscall.Readlink(%s, buf): %+v", n.RealPath, err)
+		return nil, fuse.EIO
+	}
+	Log.Debug(string(buf[:num]))
+	return buf[:num], fuse.ENOSYS
 }
 
 func (n *FNode) Mknod(name string, mode uint32, dev uint32, context *fuse.Context) (newNode *nodefs.Inode, code fuse.Status) {
@@ -119,8 +174,23 @@ func (n *FNode) OpenDir(context *fuse.Context) (ret_dirs []fuse.DirEntry, ret_co
 	_start := time.Now()
 	defer PrintCallDuration("OpenDir", &_start)
 
+	ans := make([]fuse.DirEntry, 0)
+	files, err := ioutil.ReadDir(n.RealPath)
+	if err != nil {
+		Log.ErrorF("OpenDir (RealPath=%s): %+v", n.RealPath, err)
+		return nil, fuse.ENOSYS
+	}
+	for _, file := range files {
+		new_file := fuse.DirEntry{}
+		new_file.Name = file.Name()
+		new_file.Mode = uint32(file.Mode())
+		if !IsHidden(file.Name()) {
+			ans = append(ans, new_file)
+		}
+	}
+
 	Log.DebugF("OpenDir (context=%v)", *context)
-	return nil, fuse.ENOSYS
+	return ans, fuse.OK
 }
 
 func (n *FNode) GetXAttr(attribute string, context *fuse.Context) (data []byte, code fuse.Status) {
@@ -148,7 +218,20 @@ func (n *FNode) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context)
 	defer PrintCallDuration("GetAttr", &_start)
 
 	Log.DebugF("GetAttr (n=%v; out=%v; file=%v; context=%v)", *n, *out, file, *context)
-	return fuse.ENOSYS
+
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
+
+	path := n.RealPath
+	var stat syscall.Stat_t
+	// Get real parameters
+	if err := syscall.Lstat(path, &stat); err != nil {
+		Log.ErrorF("syscall.Lstat(%s, stat): %+v", path, err)
+		return fuse.EIO
+	}
+	out.FromStat(&stat)
+	return fuse.OK
 }
 
 func (n *FNode) Chmod(file nodefs.File, perms uint32, context *fuse.Context) (code fuse.Status) {

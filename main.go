@@ -20,8 +20,9 @@ var FUSEServer *fuse.Server
 var Unmounting bool
 var Log *logger.Logger
 var HideList []string
-var Recursive bool
 var SourcePath string
+
+const DEFAULT_HIDE_LIST = ".git*:.cache:.svn:.hg"
 
 func PrintCallDuration(prefix string, start *time.Time) {
 	elapsed := time.Since(*start)
@@ -38,8 +39,7 @@ func main() {
 
 	// Get CLI options
 	fuse_debug := flag.Bool("fuse-debug", false, "print debugging messages.")
-	hide_list := flag.String("hide", ".git:.svn:.hg", "pattern for pretending files and folders don't exist.")
-	recursive := flag.Bool("recursive", false, "if set to true, will pretend hidden files and folders don't exist even if an application has the full path.")
+	hide_list := flag.String("hide", DEFAULT_HIDE_LIST, "pattern for pretending files and folders don't exist.")
 	other := flag.Bool("allow-other", false, "mount with -o allowother.")
 	flag.Parse()
 	if flag.NArg() < 2 {
@@ -48,7 +48,7 @@ func main() {
 	SourcePath, _ = filepath.Abs(flag.Arg(0))
 	mount_point, _ := filepath.Abs(flag.Arg(1))
 	HideList = strings.Split(*hide_list, ":")
-	Recursive = *recursive
+	RootNode.RealPath = SourcePath
 
 	// Prepare fs
 	FSConn = nodefs.NewFileSystemConnector(RootNode, &nodefs.Options{})

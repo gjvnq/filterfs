@@ -225,21 +225,21 @@ func (n *FNode) Symlink(name string, content string, context *fuse.Context) (new
 	if n.IsHidden() {
 		return nil, fuse.ENOENT
 	}
-	if IsHidden(n.joinWith(name)) {
+
+	full_old_path := n.joinWith(content)
+	full_new_path := n.joinWith(name)
+	if IsHidden(full_old_path) {
 		return nil, fuse.ENOENT
 	}
-	if IsHidden(content) {
-		return nil, fuse.ENOENT
+	if IsHidden(full_new_path) {
+		return nil, fuse.EPERM
 	}
 
-	// return nil, fuse.ENOENT
-	old := n.joinWith(content)
-	new_ := n.joinWith(name)
-	err := syscall.Symlink(old, new_)
+	err := syscall.Symlink(full_old_path, full_new_path)
 	var child *nodefs.Inode
 	if err == nil {
 		new_node := &FNode{}
-		new_node.RealPath = new_
+		new_node.RealPath = full_new_path
 		child = n.Inode().NewChild(name, false, new_node)
 	}
 
@@ -248,18 +248,16 @@ func (n *FNode) Symlink(name string, content string, context *fuse.Context) (new
 
 func (n *FNode) Rename(oldName string, newParent nodefs.Node, newName string, context *fuse.Context) (code fuse.Status) {
 	Log.DebugF("Rename (n.RealPath=%s oldName=%s newName=%s)", n.RealPath, oldName, newName)
-	// if n.IsHidden() {
-	// 	return fuse.ENOENT
-	// }
-	// if IsHidden(n.joinWith(oldName)) {
-	// 	return fuse.ENOENT
-	// }
-	// if IsHidden(n.joinWith(newName)) {
-	// 	return fuse.ENOENT
-	// }
+	full_old_path := n.joinWith(oldName)
+	full_new_path := n.joinWith(newName)
+	if IsHidden(full_old_path) {
+		return fuse.ENOENT
+	}
+	if IsHidden(full_new_path) {
+		return fuse.EPERM
+	}
 
-	// return fuse.ToStatus(syscall.Rename(oldName, newName))
-	return fuse.ENOSYS
+	return fuse.ToStatus(syscall.Rename(full_old_path, full_new_path))
 }
 
 func (n *FNode) Link(name string, existing nodefs.Node, context *fuse.Context) (newNode *nodefs.Inode, code fuse.Status) {
@@ -402,7 +400,7 @@ func (n *FNode) Chmod(file nodefs.File, perms uint32, context *fuse.Context) (co
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}
-	return fuse.ENOSYS
+	return fuse.ToStatus(syscall.Chmod(n.RealPath, perms))
 }
 
 func (n *FNode) Chown(file nodefs.File, uid uint32, gid uint32, context *fuse.Context) (code fuse.Status) {
@@ -413,7 +411,7 @@ func (n *FNode) Chown(file nodefs.File, uid uint32, gid uint32, context *fuse.Co
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}
-	return fuse.ENOSYS
+	return fuse.ToStatus(syscall.Chown(n.RealPath, int(uid), int(gid)))
 }
 
 func (n *FNode) Truncate(file nodefs.File, size uint64, context *fuse.Context) (code fuse.Status) {
@@ -424,7 +422,7 @@ func (n *FNode) Truncate(file nodefs.File, size uint64, context *fuse.Context) (
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}
-	return fuse.ENOSYS
+	return fuse.ToStatus(syscall.Truncate(n.RealPath, int64(size)))
 }
 
 func (n *FNode) Utimens(file nodefs.File, atime *time.Time, mtime *time.Time, context *fuse.Context) (code fuse.Status) {
@@ -435,7 +433,16 @@ func (n *FNode) Utimens(file nodefs.File, atime *time.Time, mtime *time.Time, co
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}
-	return fuse.ENOSYS
+
+	if atime == nil || mtime == nil {
+		Log.WarningF("Utimens(%s): atime=%v mtime=%v", n.RealPath, atime, mtime)
+		return fuse.EINVAL
+	}
+
+	return fuse.ToStatus(syscall.Utime(n.RealPath, &syscall.Utimbuf{
+		Actime:  atime.Unix(),
+		Modtime: mtime.Unix(),
+	}))
 }
 
 func (n *FNode) Fallocate(file nodefs.File, off uint64, size uint64, mode uint32, context *fuse.Context) (code fuse.Status) {

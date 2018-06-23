@@ -129,11 +129,7 @@ func (n *FNode) Access(mode uint32, context *fuse.Context) (code fuse.Status) {
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}
-	err := syscall.Access(n.RealPath, mode)
-	if err != nil {
-		Log.ErrorF("syscall.Access(%s, %d) = %+v", n.RealPath, mode, err)
-	}
-	return fuse.ToStatus(err)
+	return fuse.ToStatus(syscall.Access(n.RealPath, mode))
 }
 
 func (n *FNode) Readlink(c *fuse.Context) ([]byte, fuse.Status) {
@@ -150,7 +146,7 @@ func (n *FNode) Readlink(c *fuse.Context) ([]byte, fuse.Status) {
 	num, err := syscall.Readlink(n.RealPath, buf)
 	if err != nil {
 		Log.ErrorF("syscall.Readlink(%s, buf): %+v", n.RealPath, err)
-		return nil, fuse.EIO
+		return nil, fuse.ToStatus(err)
 	}
 	buf = buf[:num]
 	return buf, fuse.OK
@@ -193,15 +189,18 @@ func (n *FNode) Unlink(name string, context *fuse.Context) (code fuse.Status) {
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}
-	return fuse.ENOSYS
+	return fuse.ToStatus(syscall.Unlink(n.RealPath + "/" + name))
 }
+
 func (n *FNode) Rmdir(name string, context *fuse.Context) (code fuse.Status) {
-	Log.DebugF("Rmdir")
+	Log.DebugF("Rmdir (name = %s)", name)
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}
-	return fuse.ENOSYS
+
+	return fuse.ToStatus(syscall.Rmdir(n.RealPath + "/" + name))
 }
+
 func (n *FNode) Symlink(name string, content string, context *fuse.Context) (newNode *nodefs.Inode, code fuse.Status) {
 	Log.DebugF("Symlink")
 	if n.IsHidden() {
@@ -343,7 +342,7 @@ func (n *FNode) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context)
 	var stat syscall.Stat_t
 	// Get real parameters
 	if err := syscall.Lstat(path, &stat); err != nil {
-		Log.ErrorF("syscall.Lstat(%s, stat): %+v", path, err)
+		Log.WarningF("syscall.Lstat(%s, stat): %+v", path, err)
 		return fuse.ToStatus(err)
 	}
 	out.FromStat(&stat)

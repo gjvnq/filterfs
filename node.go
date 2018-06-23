@@ -56,7 +56,14 @@ func (n *FNode) StatFs() *fuse.StatfsOut {
 	if n.IsHidden() {
 		return nil
 	}
-	return nil
+	stat := syscall.Statfs_t{}
+	if err := syscall.Statfs(n.RealPath, &stat); err != nil {
+		Log.ErrorF("syscall.Statfs(%s, stat): %+v", n.RealPath, err)
+		return nil
+	}
+	fuse_stat := new(fuse.StatfsOut)
+	fuse_stat.FromStatfsT(&stat)
+	return fuse_stat
 }
 
 func (n *FNode) SetInode(node *nodefs.Inode) {
@@ -133,8 +140,8 @@ func (n *FNode) Readlink(c *fuse.Context) ([]byte, fuse.Status) {
 		Log.ErrorF("syscall.Readlink(%s, buf): %+v", n.RealPath, err)
 		return nil, fuse.EIO
 	}
-	Log.Debug(string(buf[:num]))
-	return buf[:num], fuse.ENOSYS
+	buf = buf[:num]
+	return buf, fuse.OK
 }
 
 func (n *FNode) Mknod(name string, mode uint32, dev uint32, context *fuse.Context) (newNode *nodefs.Inode, code fuse.Status) {

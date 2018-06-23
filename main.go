@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -30,6 +31,8 @@ func PrintCallDuration(prefix string, start *time.Time) {
 }
 
 func main() {
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Llongfile)
+
 	var err error
 	// Set Logger
 	Log, err = logger.New("main", 1, os.Stdout)
@@ -39,7 +42,7 @@ func main() {
 
 	// Get CLI options
 	fuse_debug := flag.Bool("fuse-debug", false, "print debugging messages.")
-	hide_list := flag.String("hide", DEFAULT_HIDE_LIST, "pattern for pretending files and folders don't exist.")
+	hide_list := flag.String("hide", DEFAULT_HIDE_LIST, "pattern for pretending files and folders don't exist (does not apply to files and folders outside the source dir but referenced via symbolic links inside of it).")
 	other := flag.Bool("allow-other", false, "mount with -o allowother.")
 	flag.Parse()
 	if flag.NArg() < 2 {

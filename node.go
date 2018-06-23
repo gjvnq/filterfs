@@ -12,8 +12,11 @@ import (
 	"github.com/hanwen/go-fuse/fuse/nodefs"
 )
 
+const DEFAULT_PERMISSIONS = 0660
+
 type FNode struct {
 	inode     *nodefs.Inode
+	fd        int
 	RealPath  string
 	Name      string
 	Size      uint64
@@ -72,11 +75,7 @@ func (n *FNode) SetInode(node *nodefs.Inode) {
 }
 
 func (n *FNode) Deletable() bool {
-	Log.DebugF("Deletable")
-	if n.IsHidden() {
-		return false
-	}
-	return true
+	return n.fd != 0
 }
 
 func (n *FNode) Inode() *nodefs.Inode {
@@ -86,6 +85,9 @@ func (n *FNode) Inode() *nodefs.Inode {
 
 func (n *FNode) OnForget() {
 	Log.DebugF("OnForget")
+	if n.fd != 0 {
+		syscall.Close(n.fd)
+	}
 }
 
 func (n *FNode) Lookup(out *fuse.Attr, name string, context *fuse.Context) (ret_node *nodefs.Inode, ret_code fuse.Status) {
@@ -233,11 +235,19 @@ func (n *FNode) Create(name string, flags uint32, mode uint32, context *fuse.Con
 }
 
 func (n *FNode) Open(flags uint32, context *fuse.Context) (file nodefs.File, code fuse.Status) {
-	Log.DebugF("Open")
+	_start := time.Now()
+	defer PrintCallDuration("Open", &_start)
+	Log.DebugF("Open (n.RealPath = %s, flags = %d)", n.RealPath, flags)
 	if n.IsHidden() {
 		return nil, fuse.ENOENT
 	}
-	return nil, fuse.OK
+
+	var err error
+	n.fd, err = syscall.Open(n.RealPath, int(flags), DEFAULT_PERMISSIONS)
+	if err != nil {
+		Log.ErrorF("syscall.Open(%s, %d, %d) = %d, %v", n.RealPath, flags, DEFAULT_PERMISSIONS, n.fd, err)
+	}
+	return nodefs.NewDefaultFile(), fuse.ToStatus(err)
 }
 
 func (n *FNode) Flush(file nodefs.File, openFlags uint32, context *fuse.Context) (code fuse.Status) {
@@ -401,7 +411,20 @@ func (n *FNode) Read(file nodefs.File, dest []byte, off int64, context *fuse.Con
 	if n.IsHidden() {
 		return nil, fuse.ENOENT
 	}
-	return nil, fuse.ENOSYS
+
+	// Safety
+	if n.fd == 0 {
+		Log.WarningF("File '%s' has not been opened yet", n.RealPath)
+		return fuse.ReadResultData(nil), fuse.EBADF
+	}
+
+	// Read
+	_, err := syscall.Pread(n.fd, dest, off)
+	if err != nil {
+		Log.ErrorF("syscall.Pread(%d, [%d]byte{...}, %d) = _, %v", n.fd, len(dest), off, err)
+		return fuse.ReadResultData(nil), fuse.ToStatus(err)
+	}
+	return fuse.ReadResultData(dest), fuse.OK
 }
 
 func (n *FNode) Write(file nodefs.File, data []byte, off int64, context *fuse.Context) (written uint32, code fuse.Status) {
@@ -411,5 +434,17 @@ func (n *FNode) Write(file nodefs.File, data []byte, off int64, context *fuse.Co
 	if n.IsHidden() {
 		return 0, fuse.ENOENT
 	}
-	return 0, fuse.ENOSYS
+
+	// Safety
+	if n.fd == 0 {
+		Log.WarningF("File '%s' has not been opened yet", n.RealPath)
+		return 0, fuse.EBADF
+	}
+	// Read
+	num, err := syscall.Pwrite(n.fd, data, off)
+	if err != nil {
+		Log.ErrorF("syscall.Pwrite(%d, [%d]byte{...}, %d) = %d, %v", n.fd, len(data), off, num, err)
+		return uint32(num), fuse.ToStatus(err)
+	}
+	return uint32(num), fuse.OK
 }

@@ -53,6 +53,9 @@ func (n *FNode) IsHidden() bool {
 
 func (n *FNode) StatFs() *fuse.StatfsOut {
 	Log.DebugF("StatFs")
+	if n.IsHidden() {
+		return nil
+	}
 	return nil
 }
 
@@ -63,6 +66,9 @@ func (n *FNode) SetInode(node *nodefs.Inode) {
 
 func (n *FNode) Deletable() bool {
 	Log.DebugF("Deletable")
+	if n.IsHidden() {
+		return false
+	}
 	return true
 }
 
@@ -108,12 +114,19 @@ func (n *FNode) Lookup(out *fuse.Attr, name string, context *fuse.Context) (ret_
 
 func (n *FNode) Access(mode uint32, context *fuse.Context) (code fuse.Status) {
 	Log.DebugF("Access")
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
 	return fuse.ENOSYS
 }
 
 func (n *FNode) Readlink(c *fuse.Context) ([]byte, fuse.Status) {
 	Log.DebugF("Readlink")
 	buf := make([]byte, 999)
+
+	if n.IsHidden() {
+		return nil, fuse.ENOENT
+	}
 
 	num, err := syscall.Readlink(n.RealPath, buf)
 	if err != nil {
@@ -126,53 +139,87 @@ func (n *FNode) Readlink(c *fuse.Context) ([]byte, fuse.Status) {
 
 func (n *FNode) Mknod(name string, mode uint32, dev uint32, context *fuse.Context) (newNode *nodefs.Inode, code fuse.Status) {
 	Log.DebugF("Mknod")
+	if n.IsHidden() {
+		return nil, fuse.ENOENT
+	}
 	return nil, fuse.ENOSYS
 }
 func (n *FNode) Mkdir(name string, mode uint32, context *fuse.Context) (newNode *nodefs.Inode, code fuse.Status) {
 	Log.DebugF("Mkdir")
+	if n.IsHidden() {
+		return nil, fuse.ENOENT
+	}
 	return nil, fuse.ENOSYS
 }
 func (n *FNode) Unlink(name string, context *fuse.Context) (code fuse.Status) {
 	Log.DebugF("Unlink")
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
 	return fuse.ENOSYS
 }
 func (n *FNode) Rmdir(name string, context *fuse.Context) (code fuse.Status) {
 	Log.DebugF("Rmdir")
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
 	return fuse.ENOSYS
 }
 func (n *FNode) Symlink(name string, content string, context *fuse.Context) (newNode *nodefs.Inode, code fuse.Status) {
 	Log.DebugF("Symlink")
+	if n.IsHidden() {
+		return nil, fuse.ENOENT
+	}
 	return nil, fuse.ENOSYS
 }
 
 func (n *FNode) Rename(oldName string, newParent nodefs.Node, newName string, context *fuse.Context) (code fuse.Status) {
 	Log.DebugF("Rename")
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
 	return fuse.ENOSYS
 }
 
 func (n *FNode) Link(name string, existing nodefs.Node, context *fuse.Context) (newNode *nodefs.Inode, code fuse.Status) {
 	Log.DebugF("Link")
+	if n.IsHidden() {
+		return nil, fuse.ENOENT
+	}
 	return nil, fuse.ENOSYS
 }
 
 func (n *FNode) Create(name string, flags uint32, mode uint32, context *fuse.Context) (file nodefs.File, newNode *nodefs.Inode, code fuse.Status) {
 	Log.DebugF("Create")
+	if n.IsHidden() {
+		return nil, nil, fuse.ENOENT
+	}
 	return nil, nil, fuse.ENOSYS
 }
 
 func (n *FNode) Open(flags uint32, context *fuse.Context) (file nodefs.File, code fuse.Status) {
 	Log.DebugF("Open")
+	if n.IsHidden() {
+		return nil, fuse.ENOENT
+	}
 	return nil, fuse.OK
 }
 
 func (n *FNode) Flush(file nodefs.File, openFlags uint32, context *fuse.Context) (code fuse.Status) {
 	Log.DebugF("Flush")
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
 	return fuse.ENOSYS
 }
 
 func (n *FNode) OpenDir(context *fuse.Context) (ret_dirs []fuse.DirEntry, ret_code fuse.Status) {
 	_start := time.Now()
 	defer PrintCallDuration("OpenDir", &_start)
+
+	if n.IsHidden() {
+		return nil, fuse.ENOENT
+	}
 
 	ans := make([]fuse.DirEntry, 0)
 	files, err := ioutil.ReadDir(n.RealPath)
@@ -195,21 +242,33 @@ func (n *FNode) OpenDir(context *fuse.Context) (ret_dirs []fuse.DirEntry, ret_co
 
 func (n *FNode) GetXAttr(attribute string, context *fuse.Context) (data []byte, code fuse.Status) {
 	Log.DebugF("GetXAttr (attribute=%v)", attribute)
+	if n.IsHidden() {
+		return nil, fuse.ENOENT
+	}
 	return nil, fuse.ENOSYS
 }
 
 func (n *FNode) RemoveXAttr(attr string, context *fuse.Context) fuse.Status {
 	Log.DebugF("RemoveXAttr")
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
 	return fuse.ENOSYS
 }
 
 func (n *FNode) SetXAttr(attr string, data []byte, flags int, context *fuse.Context) fuse.Status {
 	Log.DebugF("SetXAttr")
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
 	return fuse.ENOSYS
 }
 
 func (n *FNode) ListXAttr(context *fuse.Context) (attrs []string, code fuse.Status) {
 	Log.DebugF("ListXAttr")
+	if n.IsHidden() {
+		return nil, fuse.ENOENT
+	}
 	return nil, fuse.ENOSYS
 }
 
@@ -236,36 +295,57 @@ func (n *FNode) GetAttr(out *fuse.Attr, file nodefs.File, context *fuse.Context)
 
 func (n *FNode) Chmod(file nodefs.File, perms uint32, context *fuse.Context) (code fuse.Status) {
 	Log.DebugF("Chmod")
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
 	return fuse.ENOSYS
 }
 
 func (n *FNode) Chown(file nodefs.File, uid uint32, gid uint32, context *fuse.Context) (code fuse.Status) {
 	Log.DebugF("Chown")
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
 	return fuse.ENOSYS
 }
 
 func (n *FNode) Truncate(file nodefs.File, size uint64, context *fuse.Context) (code fuse.Status) {
 	Log.DebugF("Truncate")
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
 	return fuse.ENOSYS
 }
 
 func (n *FNode) Utimens(file nodefs.File, atime *time.Time, mtime *time.Time, context *fuse.Context) (code fuse.Status) {
 	Log.DebugF("Utimens")
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
 	return fuse.ENOSYS
 }
 
 func (n *FNode) Fallocate(file nodefs.File, off uint64, size uint64, mode uint32, context *fuse.Context) (code fuse.Status) {
 	Log.DebugF("Fallocate")
+	if n.IsHidden() {
+		return fuse.ENOENT
+	}
 	return fuse.ENOSYS
 }
 
 func (n *FNode) Read(file nodefs.File, dest []byte, off int64, context *fuse.Context) (ret_res fuse.ReadResult, ret_code fuse.Status) {
 	_start := time.Now()
 	defer PrintCallDuration("Read", &_start)
+	if n.IsHidden() {
+		return nil, fuse.ENOENT
+	}
 	return nil, fuse.ENOSYS
 }
 
 func (n *FNode) Write(file nodefs.File, data []byte, off int64, context *fuse.Context) (written uint32, code fuse.Status) {
 	Log.DebugF("Write")
+	if n.IsHidden() {
+		return 0, fuse.ENOENT
+	}
 	return 0, fuse.ENOSYS
 }

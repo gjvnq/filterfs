@@ -22,7 +22,7 @@ var Log *logger.Logger
 var HideList []string
 var SourcePath string
 
-const DEFAULT_HIDE_LIST = ".git*:.cache:.svn:.hg"
+const DEFAULT_HIDE_LIST = "node_modules:.git:.cache:.svn:.hg"
 
 func PrintCallDuration(prefix string, start *time.Time) {
 	elapsed := time.Since(*start)

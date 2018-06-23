@@ -22,6 +22,7 @@ var Unmounting bool
 var Log *logger.Logger
 var HideList []string
 var SourcePath string
+var MountPath string
 
 const DEFAULT_HIDE_LIST = "node_modules:.git:.cache:.svn:.hg"
 
@@ -49,21 +50,26 @@ func main() {
 		Log.FatalF("Usage:\n  filterfs SOURCE MOUNT_POINT")
 	}
 	SourcePath, _ = filepath.Abs(flag.Arg(0))
-	mount_point, _ := filepath.Abs(flag.Arg(1))
+	MountPath, _ = filepath.Abs(flag.Arg(1))
 	HideList = strings.Split(*hide_list, ":")
 	RootNode.RealPath = SourcePath
 
 	// Prepare fs
-	FSConn = nodefs.NewFileSystemConnector(RootNode, &nodefs.Options{})
+	FSConn = nodefs.NewFileSystemConnector(RootNode, &nodefs.Options{
+		EntryTimeout:    time.Second,
+		AttrTimeout:     time.Second,
+		NegativeTimeout: time.Second,
+		Debug:           *fuse_debug,
+	})
 	mOpts := &fuse.MountOptions{
 		AllowOther: *other,
 		Name:       "filterfs",
-		FsName:     mount_point,
+		FsName:     MountPath,
 		Debug:      *fuse_debug,
 	}
 
 	// Mount fs
-	FUSEServer, err = fuse.NewServer(FSConn.RawFS(), mount_point, mOpts)
+	FUSEServer, err = fuse.NewServer(FSConn.RawFS(), MountPath, mOpts)
 	if err != nil {
 		Log.FatalF("Mount fail: %v", err)
 	}
@@ -75,9 +81,11 @@ func main() {
 		for _ = range sig_chan {
 			Unmounting = true
 			Log.Notice("Unmounting...")
-			FUSEServer.Unmount()
-			FUSEServer.Unmount()
-			FUSEServer.Unmount()
+			err := FUSEServer.Unmount()
+			for err != nil {
+				Log.Error(err)
+				err = FUSEServer.Unmount()
+			}
 			Log.Notice("Unmounted")
 			os.Exit(0)
 		}

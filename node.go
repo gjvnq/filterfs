@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -28,6 +29,10 @@ type FNode struct {
 	Ctimensec uint32
 }
 
+func join(a, b string) string {
+	return filepath.Join(a, b)
+}
+
 func (fs *FNode) OnUnmount() {
 	Log.DebugF("OnUnmount")
 }
@@ -52,6 +57,10 @@ func IsHidden(path string) bool {
 
 func (n *FNode) IsHidden() bool {
 	return IsHidden(n.RealPath)
+}
+
+func (n FNode) joinWith(name string) string {
+	return filepath.Join(n.RealPath, name)
 }
 
 func (n *FNode) StatFs() *fuse.StatfsOut {
@@ -93,18 +102,21 @@ func (n *FNode) OnForget() {
 func (n *FNode) Lookup(out *fuse.Attr, name string, context *fuse.Context) (ret_node *nodefs.Inode, ret_code fuse.Status) {
 	_start := time.Now()
 	defer PrintCallDuration("Lookup", &_start)
-	Log.DebugF("Lookup (n=%v; out=%v; name=%v; context=%v)", *n, *out, name, *context)
+	Log.DebugF("Lookup (n.RealPath=%s; out=%v; name=%v; context=%v)", n.RealPath, *out, name, *context)
 
 	// Set basics
 	new_node := &FNode{}
-	new_node.RealPath = n.RealPath + "/" + name
+	new_node.RealPath = n.joinWith(name)
+	Log.DebugF("new_node.RealPath: %s", new_node.RealPath)
 	// Is hidden?
 	if new_node.IsHidden() {
 		return nil, fuse.ENOENT
 	}
 
 	// Is dir?
+	Log.DebugF("os.Stat(%s): ...", new_node.RealPath)
 	info, err := os.Stat(new_node.RealPath)
+	Log.DebugF("os.Stat(%s): %+v", new_node.RealPath, info)
 	if err != nil {
 		// Exists?
 		if os.IsNotExist(err) {
@@ -116,8 +128,11 @@ func (n *FNode) Lookup(out *fuse.Attr, name string, context *fuse.Context) (ret_
 	}
 
 	// Finish
+	Log.DebugF("Lookup: creating new child")
 	child := n.Inode().NewChild(name, info.IsDir(), new_node)
+	Log.DebugF("Lookup: getting attributes for new child")
 	child.Node().GetAttr(out, nil, context)
+	Log.DebugF("Lookup: returning")
 	return child, fuse.OK
 }
 
@@ -149,6 +164,10 @@ func (n *FNode) Readlink(c *fuse.Context) ([]byte, fuse.Status) {
 		return nil, fuse.ToStatus(err)
 	}
 	buf = buf[:num]
+
+	// Replace base to make the link behavee properly
+	buf = bytes.Replace(buf, []byte(SourcePath), []byte(MountPath), 1)
+
 	return buf, fuse.OK
 }
 
@@ -202,18 +221,44 @@ func (n *FNode) Rmdir(name string, context *fuse.Context) (code fuse.Status) {
 }
 
 func (n *FNode) Symlink(name string, content string, context *fuse.Context) (newNode *nodefs.Inode, code fuse.Status) {
-	Log.DebugF("Symlink")
+	Log.DebugF("Symlink (n.RealPath=%s name=%s content=%s)", n.RealPath, name, content)
 	if n.IsHidden() {
 		return nil, fuse.ENOENT
 	}
-	return nil, fuse.ENOSYS
+	if IsHidden(n.joinWith(name)) {
+		return nil, fuse.ENOENT
+	}
+	if IsHidden(content) {
+		return nil, fuse.ENOENT
+	}
+
+	// return nil, fuse.ENOENT
+	old := n.joinWith(content)
+	new_ := n.joinWith(name)
+	err := syscall.Symlink(old, new_)
+	var child *nodefs.Inode
+	if err == nil {
+		new_node := &FNode{}
+		new_node.RealPath = new_
+		child = n.Inode().NewChild(name, false, new_node)
+	}
+
+	return child, fuse.ToStatus(err)
 }
 
 func (n *FNode) Rename(oldName string, newParent nodefs.Node, newName string, context *fuse.Context) (code fuse.Status) {
-	Log.DebugF("Rename")
-	if n.IsHidden() {
-		return fuse.ENOENT
-	}
+	Log.DebugF("Rename (n.RealPath=%s oldName=%s newName=%s)", n.RealPath, oldName, newName)
+	// if n.IsHidden() {
+	// 	return fuse.ENOENT
+	// }
+	// if IsHidden(n.joinWith(oldName)) {
+	// 	return fuse.ENOENT
+	// }
+	// if IsHidden(n.joinWith(newName)) {
+	// 	return fuse.ENOENT
+	// }
+
+	// return fuse.ToStatus(syscall.Rename(oldName, newName))
 	return fuse.ENOSYS
 }
 
@@ -226,7 +271,7 @@ func (n *FNode) Link(name string, existing nodefs.Node, context *fuse.Context) (
 }
 
 func (n *FNode) Create(name string, flags uint32, mode uint32, context *fuse.Context) (file nodefs.File, newNode *nodefs.Inode, code fuse.Status) {
-	Log.DebugF("Create")
+	Log.DebugF("Create (n.RealPath=%s name=%s flags=%d, mode=%d)", n.RealPath, name, flags, mode)
 	if n.IsHidden() {
 		return nil, nil, fuse.ENOENT
 	}
@@ -250,7 +295,7 @@ func (n *FNode) Open(flags uint32, context *fuse.Context) (file nodefs.File, cod
 }
 
 func (n *FNode) Flush(file nodefs.File, openFlags uint32, context *fuse.Context) (code fuse.Status) {
-	Log.DebugF("Flush")
+	Log.DebugF("Flush (n.RealPath=%s file=%v openFlags=%d)", n.RealPath, file, openFlags)
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}
@@ -271,6 +316,7 @@ func (n *FNode) OpenDir(context *fuse.Context) (ret_dirs []fuse.DirEntry, ret_co
 		Log.ErrorF("OpenDir (RealPath=%s): %+v", n.RealPath, err)
 		return nil, fuse.ENOSYS
 	}
+	Log.DebugF("OpenDir(RealPath=%s): got %d files", len(files))
 	for _, file := range files {
 		new_file := fuse.DirEntry{}
 		new_file.Name = file.Name()
@@ -280,7 +326,6 @@ func (n *FNode) OpenDir(context *fuse.Context) (ret_dirs []fuse.DirEntry, ret_co
 		}
 	}
 
-	Log.DebugF("OpenDir (context=%v)", *context)
 	return ans, fuse.OK
 }
 
@@ -353,7 +398,7 @@ func (n *FNode) Chmod(file nodefs.File, perms uint32, context *fuse.Context) (co
 	_start := time.Now()
 	defer PrintCallDuration("Chmod", &_start)
 
-	Log.DebugF("Chmod")
+	Log.DebugF("Chmod (n.RealPath=%s file=%v perms=%d)", n.RealPath, file, perms)
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}
@@ -364,7 +409,7 @@ func (n *FNode) Chown(file nodefs.File, uid uint32, gid uint32, context *fuse.Co
 	_start := time.Now()
 	defer PrintCallDuration("Chown", &_start)
 
-	Log.DebugF("Chown")
+	Log.DebugF("Chown (n.RealPath=%s file=%v uid=%d gid=%d)", n.RealPath, file, uid, gid)
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}
@@ -375,7 +420,7 @@ func (n *FNode) Truncate(file nodefs.File, size uint64, context *fuse.Context) (
 	_start := time.Now()
 	defer PrintCallDuration("Truncate", &_start)
 
-	Log.DebugF("Truncate")
+	Log.DebugF("Truncate (n.RealPath=%s file=%v size=%d)", n.RealPath, file, size)
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}
@@ -386,7 +431,7 @@ func (n *FNode) Utimens(file nodefs.File, atime *time.Time, mtime *time.Time, co
 	_start := time.Now()
 	defer PrintCallDuration("Utimens", &_start)
 
-	Log.DebugF("Utimens")
+	Log.DebugF("Utimens (n.RealPath=%s file=%v atime=%v, mtime=%v)", n.RealPath, file, atime, mtime)
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}
@@ -398,6 +443,7 @@ func (n *FNode) Fallocate(file nodefs.File, off uint64, size uint64, mode uint32
 	defer PrintCallDuration("Fallocate", &_start)
 
 	Log.DebugF("Fallocate")
+	Log.DebugF("Fallocate (n.RealPath=%s file=%v off=%d size=%d mode=%d)", n.RealPath, file, off, size, mode)
 	if n.IsHidden() {
 		return fuse.ENOENT
 	}

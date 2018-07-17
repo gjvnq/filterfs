@@ -54,6 +54,11 @@ func main() {
 	HideList = strings.Split(*hide_list, ":")
 	RootNode.RealPath = SourcePath
 
+	if !*fuse_debug {
+		Log.Info("Disabling debug")
+		Log.Levels["DEBUG"] = false
+	}
+
 	// Prepare fs
 	FSConn = nodefs.NewFileSystemConnector(RootNode, &nodefs.Options{
 		EntryTimeout:    time.Second,

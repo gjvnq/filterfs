@@ -24,7 +24,7 @@ var HideList []string
 var SourcePath string
 var MountPath string
 
-const DEFAULT_HIDE_LIST = "node_modules:.git:.cache:.svn:.hg"
+const DEFAULT_HIDE_LIST = "__pycache__:node_modules:.git:.cache:.svn:.hg:.tox"
 
 func PrintCallDuration(prefix string, start *time.Time) {
 	elapsed := time.Since(*start)
@@ -98,5 +98,6 @@ func main() {
 
 	// Start things
 	Log.Notice("Serving...")
+	Log.Notice("Hide list: ", HideList)
 	FUSEServer.Serve()
 }
